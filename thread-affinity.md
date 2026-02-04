@@ -33,7 +33,7 @@
   osScheduling/real_time         1.35 ms        0.124 ms          511  <- 同一个核
   threadAffinity/real_time      0.481 ms        0.071 ms         1389  <- 不同核
   ```
-- 进一步通过perf c2c record可以看到命令更高，缓存没有实效，只是不用重新拉取（使用perf c2c求证）
+- 进一步通过perf c2c record可以看到命令更高，缓存没有实效，只是不用重新拉取（使用perf c2c求证）；如果不同核上且核上只有1个cacheline那么会出现挤占现象吧（待求证）
   ```
   perf c2c record ./thread_affinity --benchmark_affinity=threadAffinity
   perf c2c record ./thread_affinity --benchmark_affinity=osScheduling
