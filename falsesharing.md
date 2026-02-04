@@ -1,4 +1,4 @@
-<img width="1620" height="190" alt="image" src="https://github.com/user-attachments/assets/32bc62c1-659a-4104-b7c6-b409c725794d" /><img width="1620" height="190" alt="image" src="https://github.com/user-attachments/assets/32bc62c1-659a-4104-b7c6-b409c725794d" />- 通过打印发现四个变量内存地址是相邻的
+- 通过打印发现四个变量内存地址是相邻的
   ```
     g++ vary_thread.cpp -o falsesharing -lbenchmark
   
