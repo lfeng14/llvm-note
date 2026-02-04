@@ -45,29 +45,29 @@
   BENCHMARK(branchBenchRandom)->Apply(custom_args)->Unit(benchmark::kMicrosecond);
   BENCHMARK_MAIN();
   ```
-  - 通过不同的概率查看分支预测情况: 中间耗时大，两头小；
-    ```
-     g++ random.cpp -O3 -march=native -mtune=native -flto -fuse-linker-plugin --std=c++2a -pthread -lbenchmark -o random
-     sudo perf stat ./random --benchmark_filter=branchBenchRandom/14/0
-  
-    ./random 
-    2026-02-04T13:35:00+00:00
-    Running ./random
-    Run on (10 X 48 MHz CPU s)
-    Load Average: 0.00, 0.00, 0.00
-    ***WARNING*** Library was built as DEBUG. Timings may be affected.
-    -------------------------------------------------------------------
-    Benchmark                         Time             CPU   Iterations
-    -------------------------------------------------------------------
-    branchBenchRandom/14/0         9.23 us         9.23 us        64400
-    branchBenchRandom/14/10        9.62 us         9.62 us        72629
-    branchBenchRandom/14/20        10.3 us         10.3 us        66517
-    branchBenchRandom/14/30        11.4 us         11.4 us        61202
-    branchBenchRandom/14/40        12.7 us         12.7 us        54823
-    branchBenchRandom/14/50        13.8 us         13.8 us        49407
-    branchBenchRandom/14/60        12.7 us         12.7 us        56184
-    branchBenchRandom/14/70        10.2 us         10.2 us        68919
-    branchBenchRandom/14/80        8.48 us         8.48 us        83314
-    branchBenchRandom/14/90        8.12 us         8.12 us        85753
-    branchBenchRandom/14/100       8.21 us         8.21 us        83141
-    ```
+- 通过不同的概率查看分支预测情况: 中间耗时大，两头小；perf stat显示branch-miss跟耗时趋势一样；
+  ```
+   g++ random.cpp -O3 -march=native -mtune=native -flto -fuse-linker-plugin --std=c++2a -pthread -lbenchmark -o random
+   sudo perf stat ./random --benchmark_filter=branchBenchRandom/14/0
+
+  ./random 
+  2026-02-04T13:35:00+00:00
+  Running ./random
+  Run on (10 X 48 MHz CPU s)
+  Load Average: 0.00, 0.00, 0.00
+  ***WARNING*** Library was built as DEBUG. Timings may be affected.
+  -------------------------------------------------------------------
+  Benchmark                         Time             CPU   Iterations
+  -------------------------------------------------------------------
+  branchBenchRandom/14/0         9.23 us         9.23 us        64400
+  branchBenchRandom/14/10        9.62 us         9.62 us        72629
+  branchBenchRandom/14/20        10.3 us         10.3 us        66517
+  branchBenchRandom/14/30        11.4 us         11.4 us        61202
+  branchBenchRandom/14/40        12.7 us         12.7 us        54823
+  branchBenchRandom/14/50        13.8 us         13.8 us        49407
+  branchBenchRandom/14/60        12.7 us         12.7 us        56184
+  branchBenchRandom/14/70        10.2 us         10.2 us        68919
+  branchBenchRandom/14/80        8.48 us         8.48 us        83314
+  branchBenchRandom/14/90        8.12 us         8.12 us        85753
+  branchBenchRandom/14/100       8.21 us         8.21 us        83141
+  ```
