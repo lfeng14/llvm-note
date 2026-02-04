@@ -71,3 +71,7 @@
   branchBenchRandom/14/90        8.12 us         8.12 us        85753
   branchBenchRandom/14/100       8.21 us         8.21 us        83141
   ```
+- 通过给代码加likely(builtin_expect)、unlikely
+
+#### 附件
+- https://github.com/CoffeeBeforeArch/misc_code/blob/master/biased_branches/random.cpp
