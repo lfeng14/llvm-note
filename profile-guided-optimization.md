@@ -1,0 +1,1 @@
+- [示例](https://godbolt.org/z/34ThzrhjY)
