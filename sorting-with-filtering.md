@@ -52,5 +52,6 @@
   flat_hash_map/16/1000         319 us          319 us         2223
   flat_hash_map/16/10000        760 us          760 us          847 <-- 视频中这种效果更好
   ```
+- 标准库排序 < unordered_map计数 < flat_hash_map计数
 #### 附件
 - https://github.com/CoffeeBeforeArch/misc_code/blob/master/sorting/sorting.cpp
