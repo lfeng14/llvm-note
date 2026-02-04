@@ -1,4 +1,4 @@
-- 构建运行，控制数组大小和取值范围
+- 构建运行，控制数组大小（2^10）和取值范围(10000)
   ```
    g++ duplicate_removal.cpp -g -O3 -flto -fuse-linker-plugin -march=native -mtune=native -lbenchmark -lpthread -o duplicate_removal  -std=c++20
    ./duplicate_removal
@@ -6,7 +6,7 @@
   ----------------------------------------------------------------------
   Benchmark                            Time             CPU   Iterations
   ----------------------------------------------------------------------
-  baseline/10/10                    2.48 us         2.48 us       280029
+  baseline/10（元素个数）/10（元素范围）                    2.48 us         2.48 us       280029
   baseline/10/100                   8.10 us         8.10 us        85010
   baseline/10/1000                  53.1 us         53.1 us        12245
   baseline/10/10000                 85.0 us         85.0 us         8268
@@ -55,5 +55,8 @@
   sort_unique/12/1000               32.9 us         32.9 us        25688
   sort_unique/12/10000              30.4 us         30.4 us        24814
   ```
+  - 元素增加，耗时增加；元素个数增加一倍，耗时？；元素范围增加一倍，耗时？；
+  - 从vector转为unordered_set，性能提升，因为使用hash表来插入；
+  - c++标准库的性能还是最好的；
 #### 附件
 - https://github.com/CoffeeBeforeArch/misc_code/blob/master/duplicate_removal/duplicate_removal.cpp
