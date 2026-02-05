@@ -1,3 +1,9 @@
+
+- 当我们在代码中添加likely（对应编译器内建函数__builtin_expect）或unlikely这类分支预测提示后，开启O1编译优化级别并查看生成的汇编代码时会发现，被标记为likely的分支代码会被编译器排布在条件判断指令的后续执行路径上（即“无跳转”的直连路径）。
+
+<img width="2638" height="920" alt="image" src="https://github.com/user-attachments/assets/8e4ea675-c070-453a-af57-58debf149900" />
+<img width="2564" height="936" alt="image" src="https://github.com/user-attachments/assets/87384c75-ac6b-43ea-af30-53f78d12153a" />
+
 - demo
   ```
   #include <benchmark/benchmark.h>
@@ -71,10 +77,6 @@
   branchBenchRandom/14/90        8.12 us         8.12 us        85753
   branchBenchRandom/14/100       8.21 us         8.21 us        83141
   ```
-- 当我们在代码中添加likely（对应编译器内建函数__builtin_expect）或unlikely这类分支预测提示后，开启O1编译优化级别并查看生成的汇编代码时会发现，被标记为likely的分支代码会被编译器排布在条件判断指令的后续执行路径上（即“无跳转”的直连路径）。
-
-<img width="2638" height="920" alt="image" src="https://github.com/user-attachments/assets/8e4ea675-c070-453a-af57-58debf149900" />
-<img width="2564" height="936" alt="image" src="https://github.com/user-attachments/assets/87384c75-ac6b-43ea-af30-53f78d12153a" />
 
 #### 附件
 - godbolt: https://godbolt.org/z/n1E4KP47d
