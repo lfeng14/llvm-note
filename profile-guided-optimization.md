@@ -1,4 +1,4 @@
--
+- 使用gcc的插桩pgo，生成默认mod_bench.gcda
 ```
 $ g++ mod_bench.cpp -lbenchmark -lpthread -O3 -march=native -mtune=native -flto -fuse-linker-plugin -fprofile-generate -fno-tree-vectorize -o mod_bench
 $ ./mod_bench 
