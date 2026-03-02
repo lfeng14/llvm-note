@@ -54,7 +54,23 @@
 - 若目标 GC 无需对应屏障，相关内置函数可选用；GC 策略会将其替换为对应加载/存储指令。
 - 当前设计不足：屏障内置函数未包含底层操作的大小与对齐信息，默认按指针大小和目标机器默认对齐处理。
 
+在 LLVM 的垃圾回收框架中，LLVM 本身**只负责提供基础设施**，而实际的垃圾清理工作由**运行时系统（Runtime）** 完成。具体分工如下：
+
+- 垃圾清理**LLVM 的作用**：
+  - 在编译过程中插入**安全点（safepoint）** 指令（如 `gc.statepoint`）。
+  - 为每个安全点生成**栈映射表（stack map）**，记录当前栈帧和寄存器中哪些位置存放了指向堆对象的指针（即根引用）。
+  - 可选地插入读/写屏障（如果回收算法需要）。
+- **运行时的作用**：
+  - 当程序执行到安全点时，暂停线程（例如通过信号或主动轮询），将控制权交给垃圾回收器。
+  - 利用 LLVM 提供的栈映射信息，**精确地枚举所有根引用**（全局变量、栈上的局部变量、寄存器中的指针等）。
+  - 根据所选用的回收算法（标记-清扫、复制、分代、并发等）执行**实际的内存标记、清理、压缩**等操作。
+  - 如果对象被移动（如复制式收集），运行时还需更新所有根引用（包括栈和寄存器中的指针）指向新地址。
+- 简而言之，LLVM 是“工具提供者”，负责生成让垃圾回收器能够准确识别根所需的元数据；而真正的“清洁工”是运行时中的垃圾回收器实现。二者通过安全点和栈映射协作，实现精确式自动内存管理。
+
 #### 附件
-- https://llvm.org/docs/GarbageCollection.html#plugin
+- https://llvm.org/docs/GarbageCollection.html
 - https://llvm.org/docs/Statepoints.html
 - https://llvm.org/docs/StackMaps.html#stackmap-section
+- https://llvm.org/docs/LangRef.html有LLVM IR中和GC相关部分的介绍
+- statepoint作者preames对statepoint的介绍：https://github.com/preames/public-notes/blob/master/llvm-gc-retrospective-2019)
+- https://github.com/jeandle/document/blob/main/GC/Safepoint.md
