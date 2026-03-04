@@ -1,0 +1,5 @@
+- pr: https://github.com/jeandle/jeandle-llvm/pull/15/changes#diff-3f05c00c1ba4ebe15ca72c030f39bc8257b80c0f0741068566249fd0c5d9f48e
+- callee save vs caller save
+  - 假如caller通过for循环调用callee，那么首位进行一次保存寄存器开销小；
+- LR FP用于栈展开，哪时候需要栈展开 ？
+  - 异常发生在调用链的末端，这使需要栈展开，逐层寻找每层栈帧是否有异常捕获逻辑
