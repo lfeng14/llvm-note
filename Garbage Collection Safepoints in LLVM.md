@@ -1,1 +1,6 @@
-- 
+- GC知道堆中所有已分配的对象，通过StackMap找到根对象作为起点，遍历出所有存活的引用链对象，剩下未被遍历到的就是没有被引用的，会被回收。StackMap的作用是给GC提供准确的根对象位置，确保遍历起点不遗漏。 
+- The gc function attribute is used to specify the desired GC strategy to the compiler.
+- LLVM provides support for generating stack maps at call sites, polling for a safepoint, and emitting load and store barriers.
+- 更准确地说，是编译器在生成 Statepoint 这个安全点指令的过程中，完成了对引用位置的分析，然后将结果存入 StackMap。Statepoint 本身是安全点的标记，而引用位置的确定是生成 Statepoint 时的配套分析步骤，StackMap 则是这个分析结果的存储形式。
+- 加上读写屏障防止指令重排和多线程干扰，所以 StackMap 里的引用信息在生成时是稳定的，不会出现变化。
+- 在 LLVM 的垃圾回收框架中，LLVM 本身只负责提供基础设施，而实际的垃圾清理工作由运行时系统（Runtime） 完成。简而言之，LLVM 是“工具提供者”，负责生成让垃圾回收器能够准确识别根所需的元数据；而真正的“清洁工”是运行时中的垃圾回收器实现。
