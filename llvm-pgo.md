@@ -34,6 +34,43 @@
   - -fprofile-update：Unless -fsanitize=thread is specified, the default is single, which uses non-atomic increments. The counters can be inaccurate under thread contention. atomic uses atomic increments which is accurate but has overhead. prefer-atomic will be transformed to atomic when supported by the target, or single otherwise.
   - -fprofile-continuous：Enables the continuous instrumentation profiling where profile counter updates are continuously synced to a file
   - -ftemporal-profile：Enables the temporal profiling extension for IRPGO to improve startup time by reducing .text section page faults. To do this, we instrument function timestamps to measure when each function is called for the first time and use this data to generate a function order to improve startup
+  - Fine Tuning Profile Collection
+    - void __llvm_profile_set_filename(const char *Name): changes the name of the profile file to Name.
+    - void __llvm_profile_reset_counters(void): resets all counters to zero.
+    - int __llvm_profile_dump(void): write the profile data to disk.
+    ```
+    int main() {
+      initialize();
+    
+      // Reset all profile counters to 0 to omit profile collected during
+      // initialize()'s execution.
+      __llvm_profile_reset_counters();
+      ... hot region 1
+      // Dump the profile for hot region 1.
+      __llvm_profile_set_filename("region1.profraw");
+      __llvm_profile_dump();
+    
+      // Reset counters before proceeding to hot region 2.
+      __llvm_profile_reset_counters();
+      ... hot region 2
+      // Dump the profile for hot region 2.
+      __llvm_profile_set_filename("region2.profraw");
+      __llvm_profile_dump();
+    
+      // Since the profile has been dumped, no further profile data
+      // will be collected beyond the above __llvm_profile_dump().
+      cleanup();
+      return 0;
+    }
+    ```
+    - \_\_LLVM_INSTR_PROFILE_GENERATE: defined when one of -fprofile[-instr]-generate/-fcs-profile-generate is in effect.
+    - \_\_LLVM_INSTR_PROFILE_USE: defined when one of -fprofile-use/-fprofile-instr-use is in effect.    
+    ```
+    #if __LLVM_INSTR_PROFILE_GENERATE
+    expensive_logging_of_full_program_state();
+    #endif
+    ```
+    - Instrumenting only selected files or functions: clang++ -O2 -fprofile-instr-generate -fprofile-list=fun.list code.cc -o code
 #### further reading
 - https://llvm.org/devmtg/2020-09/slides/PGO_Instrumentation.pdf
 - Patch: https://github.com/kpdev/llvm-project/tree/llvm-dev-mtg/callsite
