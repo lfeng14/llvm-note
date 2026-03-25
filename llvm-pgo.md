@@ -76,7 +76,7 @@
   - 虚拟边处理 - 处理只有单个基本块的函数等特殊情况
   - 将 profiling 信息传递给后端 - 寄存器分配器等可以利用这些信息
   - 实现了静态估算器 - 当没有动态 profiling 数据时使用
-- 论文《PGO and LLVM: Status and Current Work》
+- 论文《[PGO and LLVM: Status and Current Work](http://llvm.org/devmtg/2013-11/slides/Carruth-PGO.pdf)》
 
   - 一、关键设计
   	- 1. **基于 AST 的插桩与 Profile 关联**
