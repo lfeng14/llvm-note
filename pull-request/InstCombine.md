@@ -143,3 +143,8 @@ if (!AddOp->hasOneUse() && !AndOp->hasOneUse())
 所以，代码中那句 `if (!AddOp->hasOneUse() && !AndOp->hasOneUse()) return nullptr;` 就像一个**安全阀**：它要求至少有一个旧指令能被删除，整个优化才算是不亏本的。
 
 如果 `tmp1` 和 `tmp2` 都有别的用处，编译器就会“由于成本太高”而礼貌地拒绝这次优化。
+
+## 用例设计
+- 正向场景用例
+- 加法交换律场景用例
+- 未触发优化场景用例
