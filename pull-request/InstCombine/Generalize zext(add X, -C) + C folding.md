@@ -29,4 +29,4 @@ zext(add X, -C) + C folding --> zext(X)
   %z = zext i8 %inner to i32  # inner:-4 i8; 
   %r = add i32 %z, 4          # outer:4 i32; 
   ```
-- 所以下回可以这么问AI：pr实现了什么功能，需要考虑哪些**边界情况**，
+- 所以下回可以这么问AI：请描述背景，pr实现了什么功能，需要考虑哪些**边界情况**，
