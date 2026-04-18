@@ -2,8 +2,39 @@
 [linker](https://github.com/llvm/llvm-project/pull/192668)
 
 #### Analysis
-您说得非常对，我之前的描述确实有逻辑矛盾。感谢指正！
+- 代码注释：
+  ```
+  // Handle floating-point partial reduction
+      if (Subtarget->hasSVE2() || Subtarget->hasSME()) {
+        setPartialReduceMLAAction(ISD::PARTIAL_REDUCE_FMLA, MVT::nxv4f32,
+                                  MVT::nxv8f16, Legal);
+        // We can use SVE2p1 fdot to emulate the fixed-length variant.
+        setPartialReduceMLAAction(ISD::PARTIAL_REDUCE_FMLA, MVT::v4f32,
+                                  MVT::v8f16, Custom);
+        setPartialReduceMLAAction(ISD::PARTIAL_REDUCE_FMLA, MVT::v2f32,
+                                  MVT::v4f16, Custom);
+  
+        // We can use SVE2p1 fdot or SVE2 fmlalb/t to emulate the fixed-length
+        // variant (unless NEON fdot is natively available).
+        if (!Subtarget->isNeonAvailable() ||
+            (!Subtarget->hasF16F32DOT() && !Subtarget->hasFP16FML())) {
+          setPartialReduceMLAAction(ISD::PARTIAL_REDUCE_FMLA, MVT::v4f32,
+                                    MVT::v8f16, Custom);
+          setPartialReduceMLAAction(ISD::PARTIAL_REDUCE_FMLA, MVT::v2f32,
+                                    MVT::v4f16, Custom);
+        }
+      }
 
+  适配的用例：
+  ; RUN: llc -mattr=+f16f32dot,+sve2 < %s | FileCheck %s --check-prefixes=CHECK-FDOT
+  ; RUN: llc -mattr=+f16f32dot,+sme -force-streaming < %s | FileCheck %s --check-prefixes=CHECK-SVE-FMLALBT   // 满足 !Subtarget->isNeonAvailable() 
+
+  历史用例：
+  ; RUN: llc < %s | FileCheck %s --check-prefixes=CHECK-EXPAND
+  ; RUN: llc -mattr=+fp16fml < %s | FileCheck %s --check-prefixes=CHECK-FMLAL
+  ; RUN: llc -mattr=+f16f32dot < %s | FileCheck %s --check-prefixes=CHECK-FDOT
+  ; RUN: llc -mattr=+f16f32dot,+fp16fml < %s | FileCheck %s --check-prefixes=CHECK-FDOT
+  ```
 如果目标是“优先使用 SVE2”，那么正确的策略应该是：**当 SVE2（或 SME）可用时，就使用 SVE2 的实现，而不管 NEON FDOT 是否可用**。而不是“只有在 FDOT 不可用时才用 SVE2”——那反而是把 FDOT 当作首选了。
 
 让我重新梳理这个 PR 的真实修复逻辑。
