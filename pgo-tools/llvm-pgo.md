@@ -1,3 +1,10 @@
+#### LLVM PGO 流程（可通过小例子学习）
+- 如何插桩编译
+- 如何运行采集
+- 如何 合并数据
+- 如何反馈重编
+
+#### Analysis
 - 采样方式信息：
   - Sampled line represents the profile information of a source location. offsetN[.discriminator]: number_of_samples [fn5:num fn6:num ... ]
   - Callsite line represents the profile information of an inlined callsite. offsetA[.discriminator]: fnA:num_of_total_samples
