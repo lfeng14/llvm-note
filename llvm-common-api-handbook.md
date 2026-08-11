@@ -679,17 +679,38 @@ DT.recalculate(F);
 ### 8.3 常用查询
 
 ```cpp
+// BB1 是否支配 BB2（BB1 == BB2 时也为 true）
 bool D1 = DT.dominates(BB1, BB2);
-bool D2 = DT.properlyDominates(BB1, BB2);
-bool D3 = DT.dominates(Inst1, Inst2);
-bool D4 = DT.dominates(DefValue, UserInst);
-bool D5 = DT.dominates(DefValue, OperandUse); // PHI 场景尤其重要
 
+// BB1 是否严格支配 BB2（要求 BB1 != BB2）
+bool D2 = DT.properlyDominates(BB1, BB2);
+
+// Inst1 是否支配 Inst2
+bool D3 = DT.dominates(Inst1, Inst2);
+
+// DefValue 的定义是否支配 UserInst
+bool D4 = DT.dominates(DefValue, UserInst);
+
+// DefValue 是否支配这个具体的 Use
+// PHI 尤其重要：PHI 的 Use 发生在对应前驱边上
+bool D5 = DT.dominates(DefValue, OperandUse);
+
+
+// BB 是否可以从函数 Entry 到达
 bool Reachable = DT.isReachableFromEntry(BB);
+
+// 找 A、B 最近的公共支配块
 BasicBlock *NCD = DT.findNearestCommonDominator(A, B);
 
+
+// 获取 BB 对应的支配树节点
 DomTreeNode *N = DT.getNode(BB);
-BasicBlock *IDom = N && N->getIDom() ? N->getIDom()->getBlock() : nullptr;
+
+// 获取 BB 的直接支配者（Immediate Dominator / IDom）
+BasicBlock *IDom =
+    N && N->getIDom() ? N->getIDom()->getBlock() : nullptr;
+
+// 获取 BB 在支配树中的层级/深度
 unsigned Level = N ? N->getLevel() : 0;
 ```
 
