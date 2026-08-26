@@ -947,3 +947,41 @@ safepoint AA依赖field/element是否具有GC不变性；
 barrier AA依赖barrier自身明确、可信的内存行为，
 不应依赖SafepointInvariant。
 ```
+
+**fresh alloaction barrier消除与当前场景功能差异**
+
+两者都围绕GC barrier，属于互补优化。
+
+| 对比 | 当前GC barrier Mod/Ref AA | `dev_3`的`ReduceInitialCardMarks` |
+|---|---|---|
+| 核心问题 | 已存在的barrier会不会读写某个`MemoryLocation` | fresh object初始化时是否根本不需要barrier |
+| 分析对象 | `barrier call + Loc` | `allocation + reference store + escape/safepoint路径` |
+| 结果 | 返回`NoModRef`或`Ref` | 不插入pre/post barrier |
+| 主要收益 | 让GVN/LICM跨barrier复用或移动load | 直接消除barrier运行开销 |
+| 适用范围 | 普通对象和fresh object中仍存在的barrier | 仅fresh、未发布且路径安全的对象初始化 |
+
+例如：
+
+```java
+Node n = new Node();
+n.ref = value;
+```
+
+`dev_3`证明`n`是fresh且未发布，直接不生成barrier。
+
+而：
+
+```java
+int x = obj.value;
+obj.ref = value;       // barrier必须保留
+return x + obj.value;
+```
+
+当前Mod/Ref AA保留barrier，但证明它不影响`obj.value`，从而消除第二次load。
+
+所以可以理解为：
+
+```text
+dev_3：能删barrier就删；
+GC barrier Mod/Ref AA：不能删barrier时，减少它对其他内存优化的阻碍。
+```
