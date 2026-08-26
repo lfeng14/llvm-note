@@ -644,7 +644,7 @@ LICM改动负责保留provenance并记录hoist结果。
 
 #### Primitive array element跨safepoint场景
 
-**一句话总结：**frontend为可精确定位的primitive array element附加element offset、size和primitive metadata；AA确认查询范围完全位于该元素内后，对`safepoint_handler`返回`NoModRef`，现有LICM即可将循环内load移出。
+**一句话总结：** frontend为可精确定位的primitive array element附加element offset、size和primitive metadata；AA确认查询范围完全位于该元素内后，对`safepoint_handler`返回`NoModRef`，现有LICM即可将循环内load移出。
 
 示例：
 
