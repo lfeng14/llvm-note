@@ -640,3 +640,149 @@ LICM现有逻辑
 AA负责证明能不能移动；
 LICM改动负责保留provenance并记录hoist结果。
 ```
+---
+
+#### Primitive array element跨safepoint场景
+
+**一句话总结：**frontend为可精确定位的primitive array element附加element offset、size和primitive metadata；AA确认查询范围完全位于该元素内后，对`safepoint_handler`返回`NoModRef`，现有LICM即可将循环内load移出。
+
+示例：
+
+```java
+int sum(int[] values, int n) {
+    int result = 0;
+    for (int i = 0; i < n; i++) {
+        result += values[0];
+        // 循环回边可能包含safepoint
+    }
+    return result;
+}
+```
+
+对应IR大致为：
+
+```llvm
+%element = getelementptr inbounds i8,
+    ptr addrspace(1) %array, i64 16,
+    !java-array-element-offset !0,
+    !java-array-element-size !1,
+    !java-array-element-primitive !2
+
+%value = load atomic i32, ptr addrspace(1) %element
+call void @safepoint_handler(ptr null)
+```
+
+流程：
+
+```text
+        ┌──────────────────────────────┐
+        │ 输入safepoint call和Loc       │
+        └──────────────┬───────────────┘
+                       │
+                       v
+        ┌──────────────────────────────┐
+        │ 调用目标是safepoint_handler？ │
+        └──────────────┬───────────────┘
+                       │
+                 是    │    否
+                       │     └──────────> 默认ModRef
+                       v
+        ┌──────────────────────────────┐
+        │ array safepoint AA和          │
+        │ Java array AA均已开启？       │
+        └──────────────┬───────────────┘
+                       │
+                 是    │    否
+                       │     └──────────> 默认ModRef
+                       v
+        ┌──────────────────────────────┐
+        │ array element provenance完整？│
+        │ Root、offset、size均存在？    │
+        └──────────────┬───────────────┘
+                       │
+                 是    │    否
+                       │     └──────────> 默认ModRef
+                       v
+        ┌──────────────────────────────┐
+        │ element带有primitive标记？    │
+        └──────────────┬───────────────┘
+                       │
+                 是    │    否
+                       │     └──────────> 默认ModRef
+                       v
+        ┌──────────────────────────────┐
+        │ 查询大小固定且访问范围完全位于 │
+        │ 该array element范围内？       │
+        └──────────────┬───────────────┘
+                       │
+                 是    │    否
+                       │     └──────────> 默认ModRef
+                       v
+                ┌───────────┐
+                │ NoModRef  │
+                └─────┬─────┘
+                      │
+                      v
+          地址和值满足循环不变等条件？
+                      │
+                      v
+             LICM自动hoist load
+```
+
+核心代码：
+
+```cpp
+const bool ArraySafepointAAEnabled =
+    EnableSafepointArrayAA && EnableJavaArrayAA;
+
+JavaHeapAccess Access = getJavaHeapAccess(Loc.Ptr);
+
+// 要求：
+// 1. 这是可信的primitive array element；
+// 2. element offset和size完整；
+// 3. Loc.Size固定且精确；
+// 4. 整个访问没有越过当前element。
+bool PrimitiveElement =
+    ArraySafepointAAEnabled &&
+    Access.PrimitiveArrayElement &&
+    isAccessWithinProvenanceRange(Access.ArrayElement, Loc.Size);
+
+if (Access.Root && PrimitiveElement) {
+  recordSafepointArrayNoModRef(*Call->getFunction());
+  return ModRefInfo::NoModRef;
+}
+
+return AAResultBase::getModRefInfo(Call, Loc, AAQI);
+```
+
+primitive标记只有在element provenance可信时才保留：
+
+```cpp
+Access.PrimitiveArrayElement =
+    Facts.OuterOffset == 0 &&
+    Facts.ArrayElementSize &&
+    *Facts.ArrayElementSize != 0 &&
+    Facts.PrimitiveArrayElement;
+```
+
+对应场景：
+
+| 场景 | 处理 |
+|---|---|
+| `int[]`常量元素跨safepoint | `NoModRef`，允许LICM hoist |
+| `long[]`等primitive元素且范围精确 | `NoModRef` |
+| `Object[]`reference元素 | 默认ModRef |
+| 动态下标且没有精确offset | 默认ModRef |
+| 宽load跨越相邻元素 | 默认ModRef |
+| element外层存在非零GEP | provenance失效，保持保守 |
+| Unsafe、VarHandle或JNI地址 | 无可信metadata，保持保守 |
+| 未知或scalable访问大小 | 默认ModRef |
+
+关键原因：
+
+```text
+GC可能更新reference array中的对象引用，
+但不会改变int[]、long[]等primitive array element的数值。
+```
+
+`LICM.cpp`的联动仍只负责保留array provenance metadata和记录hoist结果；是否允许跨safepoint移动由`JavaHeapAA`的`NoModRef`结论决定。
