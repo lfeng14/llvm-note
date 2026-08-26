@@ -791,7 +791,7 @@ GC可能更新reference array中的对象引用，
 
 #### GC barrier Mod/Ref场景
 
-**一句话总结：**pre-barrier只读取被覆盖的reference slot，post-barrier只更新card table/TLS而不访问Java heap payload；AA根据barrier的真实内存行为，对指定`MemoryLocation`精确返回`Ref`或`NoModRef`。
+**一句话总结：** pre-barrier只读取被覆盖的reference slot，post-barrier只更新card table/TLS而不访问Java heap payload；AA根据barrier的真实内存行为，对指定`MemoryLocation`精确返回`Ref`或`NoModRef`。
 
 > 以下是按照检视意见修改后的目标模型；当前实现仍错误依赖`SafepointInvariant`，需要解耦。
 
