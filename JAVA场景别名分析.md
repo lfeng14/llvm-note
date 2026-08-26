@@ -786,3 +786,164 @@ GC可能更新reference array中的对象引用，
 ```
 
 `LICM.cpp`的联动仍只负责保留array provenance metadata和记录hoist结果；是否允许跨safepoint移动由`JavaHeapAA`的`NoModRef`结论决定。
+
+---
+
+#### GC barrier Mod/Ref场景
+
+**一句话总结：**pre-barrier只读取被覆盖的reference slot，post-barrier只更新card table/TLS而不访问Java heap payload；AA根据barrier的真实内存行为，对指定`MemoryLocation`精确返回`Ref`或`NoModRef`。
+
+> 以下是按照检视意见修改后的目标模型；当前实现仍错误依赖`SafepointInvariant`，需要解耦。
+
+示例：
+
+```java
+class Cell {
+    int value;
+    Object reference;
+}
+
+int test(Cell obj, Object newValue) {
+    int first = obj.value;
+    obj.reference = newValue; // 产生pre/post GC barrier
+    return first + obj.value;
+}
+```
+
+reference store大致lowering为：
+
+```text
+pre_barrier(&obj.reference)  // 读取旧reference
+store newValue -> obj.reference
+post_barrier(&obj.reference) // 更新card table/TLS queue
+```
+
+流程：
+
+```text
+        ┌──────────────────────────────┐
+        │ 输入barrier Call和查询Loc     │
+        └──────────────┬───────────────┘
+                       │
+                       v
+        ┌──────────────────────────────┐
+        │ 是签名、calling convention和 │
+        │ attribute均匹配的可信barrier？│
+        └──────────────┬───────────────┘
+                       │
+                 是    │    否
+                       │     └──────────> 默认ModRef
+                       v
+        ┌──────────────────────────────┐
+        │ 查询Loc属于Java heap？        │
+        └──────────────┬───────────────┘
+                       │
+                 是    │    否
+                       │     └──────────> 默认ModRef
+                       v
+              ┌─────────────────┐
+              │ barrier类型？    │
+              └───────┬─────────┘
+                 pre  │  post
+          ┌───────────┘   └────────────┐
+          v                            v
+┌──────────────────────┐      ┌─────────────────────┐
+│ 用参数0和reference大小│      │ 不读取Java heap     │
+│ 构造实际slot Loc      │      │ payload             │
+└──────────┬───────────┘      └──────────┬──────────┘
+           │                             │
+           v                             v
+┌──────────────────────┐           ┌──────────┐
+│ query Loc与slot确定   │           │ NoModRef │
+│ 不相交？              │           └──────────┘
+└──────────┬───────────┘
+      是   │   否
+           │
+           v
+    ┌──────────┐  ┌──────────┐
+    │ NoModRef │  │   Ref    │
+    └──────────┘  └──────────┘
+```
+
+核心逻辑：
+
+```cpp
+if (!EnableBarrierFieldAA)
+  return AAResultBase::getModRefInfo(Call, Loc, AAQI);
+
+BarrierKind Kind = getTrustedBarrierKind(Call);
+
+// 同名函数、错误签名、错误calling convention或没有可信attribute，
+// 都不能套用GC barrier语义。
+if (Kind == BarrierKind::None)
+  return AAResultBase::getModRefInfo(Call, Loc, AAQI);
+
+// 只精确回答barrier对Java heap payload的影响。
+// 对card table、TLS、C heap仍保持默认结果。
+if (!isJavaHeapLocation(Loc))
+  return AAResultBase::getModRefInfo(Call, Loc, AAQI);
+
+if (Kind == BarrierKind::Post) {
+  // post-barrier只使用Java heap地址计算card地址，
+  // 不读取或写入Java heap payload。
+  return ModRefInfo::NoModRef;
+}
+
+// pre-barrier的参数0是将被覆盖的reference slot。
+MemoryLocation Slot(
+    Call->getArgOperand(0),
+    LocationSize::precise(ReferenceSlotBytes));
+
+AliasResult R = AAQI.AAR.alias(Loc, Slot, AAQI, Call);
+
+if (R == AliasResult::NoAlias)
+  return ModRefInfo::NoModRef;
+
+// pre-barrier可能读取该slot，但不会修改Java heap payload。
+return ModRefInfo::Ref;
+```
+
+正例——查询相邻primitive field：
+
+```text
+obj.value:     [12,16)
+obj.reference: [24,32)
+
+pre_barrier(&obj.reference)对obj.value
+=> 两个range不相交
+=> NoModRef
+```
+
+反例——查询同一个reference slot：
+
+```text
+query Loc:     obj.reference [24,32)
+barrier slot:  obj.reference [24,32)
+
+pre_barrier会读取该slot
+=> Ref
+```
+
+对应场景：
+
+| 场景 | 处理 |
+|---|---|
+| pre-barrier与相邻primitive field不重叠 | `NoModRef` |
+| pre-barrier与同一reference slot重叠 | `Ref` |
+| pre-barrier与跨字段wide load可能重叠 | `Ref` |
+| pre-barrier地址来源不明，无法证明不相交 | `Ref` |
+| post-barrier查询primitive field | `NoModRef` |
+| post-barrier查询reference field | `NoModRef` |
+| post-barrier查询C heap/card table/TLS | 默认ModRef |
+| 错误签名的同名函数 | 默认ModRef |
+| 会读取Java heap的同名伪barrier | 默认ModRef |
+| G1 pre-barrier | 按实际reference-slot读取建模 |
+| G1/Serial post-barrier | 对Java heap payload返回`NoModRef` |
+
+关键区别：
+
+```text
+safepoint AA依赖field/element是否具有GC不变性；
+barrier AA依赖barrier自身明确、可信的内存行为，
+不应依赖SafepointInvariant。
+```
