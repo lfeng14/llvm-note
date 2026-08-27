@@ -8,6 +8,8 @@
 
 4. 因此别名分析只在能够建立完整provenance证明时返回`NoAlias`；来源不可见或分析复杂度超出边界时，必须保守返回`MayAlias`，以保证正确性。
 
+当前实现分工如下：structured field/array和`gc.relocate`由`JavaHeapAA`直接分析；fresh allocation由frontend在`new`/`newarray`返回值上附加LLVM`noalias`，再由BasicAA等标准AA消费；safepoint和GC barrier属于`getModRefInfo`路径，回答调用是否读写指定`MemoryLocation`。
+
 ```
 void f(Node a, Node b) { ... }       // 外部传入
 Node x = holder.child;               // 从field读取
@@ -793,7 +795,7 @@ GC可能更新reference array中的对象引用，
 
 **一句话总结：** pre-barrier只读取被覆盖的reference slot，post-barrier只更新card table/TLS而不访问Java heap payload；AA根据barrier的真实内存行为，对指定`MemoryLocation`精确返回`Ref`或`NoModRef`。
 
-> 以下是按照检视意见修改后的目标模型；当前实现仍错误依赖`SafepointInvariant`，需要解耦。
+当前实现已经将barrier Mod/Ref与`safepoint-invariant`解耦：barrier是否可信由runtime wrapper的函数名、HotSpot calling convention、函数attribute和签名共同决定，不要求查询field带`safepoint-invariant`。
 
 示例：
 
@@ -871,11 +873,11 @@ post_barrier(&obj.reference) // 更新card table/TLS queue
 if (!EnableBarrierFieldAA)
   return AAResultBase::getModRefInfo(Call, Loc, AAQI);
 
-BarrierKind Kind = getTrustedBarrierKind(Call);
+JavaBarrierKind Kind = getTrustedJavaBarrier(*Call);
 
 // 同名函数、错误签名、错误calling convention或没有可信attribute，
 // 都不能套用GC barrier语义。
-if (Kind == BarrierKind::None)
+if (Kind == JavaBarrierKind::None)
   return AAResultBase::getModRefInfo(Call, Loc, AAQI);
 
 // 只精确回答barrier对Java heap payload的影响。
@@ -883,16 +885,17 @@ if (Kind == BarrierKind::None)
 if (!isJavaHeapLocation(Loc))
   return AAResultBase::getModRefInfo(Call, Loc, AAQI);
 
-if (Kind == BarrierKind::Post) {
+if (Kind == JavaBarrierKind::Post) {
   // post-barrier只使用Java heap地址计算card地址，
   // 不读取或写入Java heap payload。
   return ModRefInfo::NoModRef;
 }
 
 // pre-barrier的参数0是将被覆盖的reference slot。
+uint64_t OopBytes = getPreBarrierSlotBytes(*Call);
 MemoryLocation Slot(
     Call->getArgOperand(0),
-    LocationSize::precise(ReferenceSlotBytes));
+    LocationSize::precise(OopBytes));
 
 AliasResult R = AAQI.AAR.alias(Loc, Slot, AAQI, Call);
 
@@ -902,6 +905,36 @@ if (R == AliasResult::NoAlias)
 // pre-barrier可能读取该slot，但不会修改Java heap payload。
 return ModRefInfo::Ref;
 ```
+
+`getTrustedJavaBarrier`只接受以下runtime wrapper：
+
+| 检查项 | 要求 |
+|---|---|
+| callee | `jeandle.pre_barrier`或`jeandle.post_barrier` |
+| calling convention | call和callee均为`HotSpot_JIT` |
+| function attribute | `jeandle-java-barrier-kind="pre"/"post"` |
+| 签名 | pre为`void(JavaHeapPtr)`；post为`void(JavaHeapPtr,JavaHeapPtr)` |
+
+因此同名伪barrier、错误签名、缺少attribute或普通calling convention都会回退LLVM基类AA。
+
+#### Compressed oop的slot范围
+
+pre-barrier的参数0是reference slot地址，不是slot中保存的oop值。Java heap地址本身通常使用宽指针，但slot可能保存4字节compressed oop。`InsertGCBarriers`在函数启用`use-compressed-oops`且store值类型明确时，在pre-barrier call site附加：
+
+即使查询地址与参数0是同一个SSA值，也不能只凭“参数相同”直接过滤：查询的`LocationSize`可能覆盖slot之外的字节，仍必须按slot宽度做范围判断；不同SSA值也不自动代表不同slot。
+
+```text
+jeandle-java-barrier-oop-kind="narrow"  // compressed oop
+jeandle-java-barrier-oop-kind="wide"    // wide oop
+```
+
+AA仅在以下条件同时满足时采用窄slot宽度：
+
+1. 编译函数有`use-compressed-oops`attribute；
+2. call site明确标记`narrow`；
+3. `DataLayout`中的`NarrowOopAddrSpace`宽度严格小于Java heap地址空间宽度。
+
+否则使用Java heap指针宽度，宁可漏掉相邻field的优化，也不缩小真实slot范围。例如真实compressed slot为`[16,20)`，相邻primitive field为`[20,24)`；只有可信的`narrow`标记才能返回`NoModRef`，缺少标记时按宽slot`[16,24)`保守返回`Ref`。
 
 正例——查询相邻primitive field：
 
@@ -937,8 +970,8 @@ pre_barrier会读取该slot
 | post-barrier查询C heap/card table/TLS | 默认ModRef |
 | 错误签名的同名函数 | 默认ModRef |
 | 会读取Java heap的同名伪barrier | 默认ModRef |
-| G1 pre-barrier | 按实际reference-slot读取建模 |
-| G1/Serial post-barrier | 对Java heap payload返回`NoModRef` |
+| G1/Serial pre-barrier wrapper | 按实际reference-slot读取建模 |
+| G1/Serial post-barrier wrapper | 对Java heap payload返回`NoModRef` |
 
 关键区别：
 
@@ -948,7 +981,7 @@ barrier AA依赖barrier自身明确、可信的内存行为，
 不应依赖SafepointInvariant。
 ```
 
-**fresh alloaction barrier消除与当前场景功能差异**
+**fresh allocation barrier消除与当前场景功能差异**
 
 两者都围绕GC barrier，属于互补优化。
 
@@ -985,3 +1018,61 @@ return x + obj.value;
 dev_3：能删barrier就删；
 GC barrier Mod/Ref AA：不能删barrier时，减少它对其他内存优化的阻碍。
 ```
+
+#### Barrier的插入、降低与消费
+
+`InsertGCBarriers`只处理Java heap中的reference store（包括wide/narrow oop）：在store前插入pre-barrier，在非null store后插入post-barrier。runtime template为两个wrapper添加`jeandle-java-barrier-kind`；G1或Serial的具体实现由wrapper在后续JavaOperationLower阶段展开。
+
+当前Jeandle流水线中的相关顺序为：
+
+```text
+InsertGCBarriers
+  -> JavaOperationLower(1)
+  -> default O3
+  -> ExpandNarrowOopCast
+  -> RewriteStatepointsForGC
+  -> JavaOperationLower(9)   // 展开pre/post wrapper
+  -> JavaOperationDeletion/TLSPointerRewrite
+  -> GVN
+  -> DSE
+```
+
+因此barrier AA是否带来实际优化，不能只看query命中，还要确认query发生在wrapper仍存在的阶段，并且GVN/DSE前后的load/store确实减少。`JavaOperationLower(9)`之后wrapper通常已经展开，末端GVN/DSE可能无法再查询`jeandle.pre/post_barrier`。
+
+可用诊断开关：
+
+```text
+-jeandle-trace-barrier-pipeline
+-jeandle-trace-barrier-field-aa
+-stats
+```
+
+其中`-jeandle-trace-barrier-pipeline`在`after-insert-gc-barriers`、`after-o3`、`after-rs4gc`、`after-lower-9`和`after-gvn-dse`输出barrier、load、store数量；`-jeandle-trace-barrier-field-aa`输出trusted query、`NoModRef`和`Ref`统计。只有AA结果和IR变化能够对应起来时，才能宣称barrier AA被流水线实际消费。
+
+#### 当前开关
+
+| 开关 | 默认值 | 作用 |
+|---|---:|---|
+| `-jeandle-enable-java-heap-aa` | `false` | 将`JavaHeapAA`注册到default AA pipeline；也可通过`-aa-pipeline=...,java-heap-aa`显式使用 |
+| `-jeandle-enable-java-field-aa` | `true` | structured object field `NoAlias`；也是field safepoint AA的provenance前置开关 |
+| `-jeandle-enable-java-array-aa` | `true` | 常量index array element `NoAlias`；也是array safepoint AA的provenance前置开关 |
+| `-jeandle-enable-java-allocation-aa` | `true` | frontend为`new`/`newarray`返回值添加`noalias` |
+| `-jeandle-enable-gc-relocate-aa` | `true` | 回溯`gc.relocate`的derived pointer |
+| `-jeandle-enable-safepoint-field-aa` | `false` | primitive field跨`safepoint_handler`的`NoModRef`，experimental |
+| `-jeandle-enable-safepoint-array-aa` | `true` | primitive array element跨`safepoint_handler`的`NoModRef`，与field开关独立 |
+| `-jeandle-enable-barrier-field-aa` | `true` | trusted GC barrier的Java heap Mod/Ref |
+| `-jeandle-safepoint-field-aa-method-filter` | 空 | 仅在函数名包含指定子串时启用field safepoint AA |
+
+所有范围、metadata、root、klass或barrier contract无法证明的情况都回退LLVM基类结果；`NoAlias`/`NoModRef`不是默认假设。
+
+诊断开关`-jeandle-trace-safepoint-field-aa`、`-jeandle-trace-barrier-field-aa`、`-jeandle-trace-barrier-pipeline`和LLVM通用的`-stats`用于统计query、`NoModRef`结果、LICM hoist以及各Pipeline阶段的load/store数量，不改变分析语义。
+
+#### 当前验证结论
+
+- `structured-fields.ll`：field range、metadata offset校验、外层GEP、header/raw地址、safepoint和barrier消费；
+- `structured-arrays.ll`：常量element range、动态/宽访问、primitive array safepoint以及field/array独立开关；
+- `allocation-provenance.ll`、`gc-relocate-provenance.ll`：fresh allocation和relocation后root/provenance；
+- `gc-barrier-modref.ll`、`gc-barrier-compressed-oop.ll`：pre同slot/相邻field/宽访问、post Java/C heap、untrusted wrapper和compressed oop宽度；
+- `exact-klass.ll`、`incompatible-classes.ll`：exact/incompatible Java klass的保守性边界。
+
+已有针对性JMH结果保持不变：不同object field load约`+0.86%`、primitive field跨safepoint约`+12%`、不同常量array element load约`+14.2%`、array element dead store约`+22.8%`、fresh allocation约`+3.6%`；相同element等负例中性。GC barrier Mod/Ref目前有lit和pipeline诊断覆盖，但暂无独立、稳定的端到端收益，因此不宣称barrier专项性能收益。
